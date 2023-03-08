@@ -1,15 +1,11 @@
 #!/bin/python3
 import argparse
 import json
-import os
 import subprocess
 import sys
-import threading
-import webbrowser
 
 import cairo
 import gi
-import requests
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
@@ -17,7 +13,6 @@ gi.require_version("Wnck", "3.0")
 gi.require_version("GObject", "2.0")
 from gi.repository import Gtk, Gdk, Wnck, GObject
 
-VERSION = 3.4
 
 INSIDE = 'inside'
 OUTSIDE = 'outside'
@@ -31,7 +26,6 @@ BORDER_G = 88
 BORDER_B = 220
 BORDER_A = 1
 SMART_HIDE_BORDER = False
-NO_VERSION_NOTIFY = False
 OFFSETS = [0, 0, 0, 0]
 
 
@@ -52,23 +46,11 @@ def set_border_rgba(args):
 
 def get_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--config", "-c", type=str, help="The path to the config file")
     parser.add_argument(
-        "--config", "-c",
-        type=str,
-        help="The path to the config file"
+        "--border-radius", type=int, default=14, help="The border radius, in pixels"
     )
-    parser.add_argument(
-        "--border-radius",
-        type=int,
-        default=14,
-        help="The border radius, in pixels"
-    )
-    parser.add_argument(
-        "--border-width",
-        type=int,
-        default=4,
-        help="The border width in pixels"
-    )
+    parser.add_argument("--border-width", type=int, default=4, help="The border width in pixels")
     parser.add_argument(
         "--border-red",
         type=int,
@@ -102,51 +84,46 @@ def get_args():
         "--border-mode",
         type=str,
         default="outside",
-        help="Whether to place the border on the outside, inside or in the center of windows. Values are `outside`, `inside`, `center`"
+        help="Whether to place the border on the outside, inside or in the center of windows. Values are `outside`, `inside`, `center`",
     )
     parser.add_argument(
         "--smart-hide-border",
         action='store_true',
-        help="Don't display a border if the window is alone in the workspace."
+        help="Don't display a border if the window is alone in the workspace.",
     )
     parser.add_argument(
         "--disable-version-warning",
         action='store_true',
-        help="Send a notification if xborders is out of date."
+        help="Send a notification if xborders is out of date.",
     )
     parser.add_argument(
         "--positive-x-offset",
         default=0,
         type=int,
-        help="How much to increase the windows size to the right."
+        help="How much to increase the windows size to the right.",
     )
     parser.add_argument(
         "--negative-x-offset",
         default=0,
         type=int,
-        help="How much to increase the windows size to the left."
+        help="How much to increase the windows size to the left.",
     )
     parser.add_argument(
         "--positive-y-offset",
         default=0,
         type=int,
-        help="How much to increase the windows size upwards."
+        help="How much to increase the windows size upwards.",
     )
     parser.add_argument(
         "--negative-y-offset",
         default=0,
         type=int,
-        help="How much to increase the windows size downwards."
+        help="How much to increase the windows size downwards.",
     )
     parser.add_argument(
-        "--version",
-        action="store_true",
-        help="Print the version of xborders and exit."
+        "--version", action="store_true", help="Print the version of xborders and exit."
     )
     args = parser.parse_args()
-    if args.version is True:
-        print(f"xborders v{VERSION}")
-        exit(0)
     if args.border_rgba is not None:
         set_border_rgba(args)
 
@@ -172,7 +149,6 @@ def get_args():
     global BORDER_B
     global BORDER_A
     global SMART_HIDE_BORDER
-    global NO_VERSION_NOTIFY
     global OFFSETS
 
     BORDER_RADIUS = args.border_radius
@@ -181,20 +157,20 @@ def get_args():
     BORDER_G = args.border_green
     BORDER_B = args.border_blue
     BORDER_A = args.border_alpha
-    NO_VERSION_NOTIFY = args.disable_version_warning
     SMART_HIDE_BORDER = args.smart_hide_border
     OFFSETS = [
         args.positive_x_offset or 0,
         args.positive_y_offset or 0,
         args.negative_x_offset or 0,
-        args.negative_y_offset or 0
+        args.negative_y_offset or 0,
     ]
 
     if args.border_mode in BORDER_MODES:
         BORDER_MODE = args.border_mode
     else:
         raise ValueError(
-            f"Invalid border_mode: '{args.border_mode}'. Valid border_modes are: inside, outside and center.")
+            f"Invalid border_mode: '{args.border_mode}'. Valid border_modes are: inside, outside and center."
+        )
 
     return
 
@@ -210,58 +186,9 @@ def get_screen_size(display):  # TODO: Multiple monitor size support
     return x1 - x0, y1 - y0
 
 
-def notify_about_version(latest_version: float):
-    notification_string = f"xborders has an update!  [{VERSION} 🡢 {latest_version}]"
-    completed_process = subprocess.run(
-        ["notify-send", "--app-name=xborder", "--expire-time=5000", notification_string, "--action=How to Update?",
-         "--action=Ignore Update"],
-        capture_output=True
-    )
-    if completed_process.returncode == 0:
-        result_string = completed_process.stdout.decode("utf-8")
-        if result_string == '':
-            return
-        result = int(result_string)
-        if result == 1:
-            our_location = os.path.dirname(os.path.abspath(__file__))
-            file = open(our_location + "/.update_ignore.txt", "w")
-            file.write(str(latest_version))
-            file.close()
-        elif result == 0:
-            webbrowser.open_new_tab("https://github.com/deter0/xborder#updating")
-    else:
-        print("something went wrong in notify-send.")
-
-
-def notify_version():
-    if NO_VERSION_NOTIFY:
-        return
-    try:
-        our_location = os.path.dirname(os.path.abspath(__file__))
-
-        url = "https://raw.githubusercontent.com/deter0/xborder/main/version.txt"  # Maybe hardcoding it is a bad idea
-        request = requests.get(url, allow_redirects=True)
-        latest_version_string = request.content.decode("utf-8")
-
-        latest_version = float(latest_version_string)
-
-        if os.path.isfile(our_location + "/.update_ignore.txt"):
-            ignore_version_file = open(our_location + "/.update_ignore.txt", "r")
-            ignored_version_string = ignore_version_file.read()
-            ignored_version = float(ignored_version_string)
-            if ignored_version == latest_version:
-                return
-
-        if VERSION < latest_version:
-            threading._start_new_thread(notify_about_version, (latest_version))
-    except:
-        subprocess.Popen(["notify-send", "--app-name=xborders", "ERROR: xborders couldn't get latest version!"])
-
-
 class Highlight(Gtk.Window):
     def __init__(self, screen_width, screen_height):
         super().__init__(type=Gtk.WindowType.POPUP)
-        notify_version()
 
         self.wnck_screen = Wnck.Screen.get_default()
 
@@ -319,8 +246,13 @@ class Highlight(Gtk.Window):
             self.move(0, 0)
         else:
             self.move(1e6, 1e6)
-            subprocess.Popen(["notify-send", "--app-name=xborder",
-                              "xborders requires a compositor. Resuming once a compositor is running."])
+            subprocess.Popen(
+                [
+                    "notify-send",
+                    "--app-name=xborder",
+                    "xborders requires a compositor. Resuming once a compositor is running.",
+                ]
+            )
 
     # Avoid memory leaks
     old_window = None
@@ -352,8 +284,12 @@ class Highlight(Gtk.Window):
 
             geom_signal_id = GObject.signal_lookup('geometry-changed', active_window)
             state_signal_id = GObject.signal_lookup('state-changed', active_window)
-            geom_has_event_connected = GObject.signal_has_handler_pending(active_window, geom_signal_id, 0, False)
-            state_has_event_connected = GObject.signal_has_handler_pending(active_window, state_signal_id, 0, False)
+            geom_has_event_connected = GObject.signal_has_handler_pending(
+                active_window, geom_signal_id, 0, False
+            )
+            state_has_event_connected = GObject.signal_has_handler_pending(
+                active_window, state_signal_id, 0, False
+            )
 
             # if it doesn't have one.
             if not geom_has_event_connected:
@@ -389,7 +325,7 @@ class Highlight(Gtk.Window):
         self.queue_draw()
 
     def _calc_border_geometry(self, window):
-        if (window.get_state() & Wnck.WindowState.FULLSCREEN != 0):
+        if window.get_state() & Wnck.WindowState.FULLSCREEN != 0:
             self.border_path = [0, 0, 0, 0]
             return
         # TODO(kay:) Find out why `get_geometry` works better than `get_client_window_geometry` on Gnome but for some windows it doesnt
@@ -430,10 +366,34 @@ class Highlight(Gtk.Window):
             if BORDER_WIDTH != 0:
                 if BORDER_RADIUS > 0:
                     degrees = 0.017453292519943295  # pi/180
-                    ctx.arc(x + w - BORDER_RADIUS, y + BORDER_RADIUS, BORDER_RADIUS, -90 * degrees, 0 * degrees)
-                    ctx.arc(x + w - BORDER_RADIUS, y + h - BORDER_RADIUS, BORDER_RADIUS, 0 * degrees, 90 * degrees)
-                    ctx.arc(x + BORDER_RADIUS, y + h - BORDER_RADIUS, BORDER_RADIUS, 90 * degrees, 180 * degrees)
-                    ctx.arc(x + BORDER_RADIUS, y + BORDER_RADIUS, BORDER_RADIUS, 180 * degrees, 270 * degrees)
+                    ctx.arc(
+                        x + w - BORDER_RADIUS,
+                        y + BORDER_RADIUS,
+                        BORDER_RADIUS,
+                        -90 * degrees,
+                        0 * degrees,
+                    )
+                    ctx.arc(
+                        x + w - BORDER_RADIUS,
+                        y + h - BORDER_RADIUS,
+                        BORDER_RADIUS,
+                        0 * degrees,
+                        90 * degrees,
+                    )
+                    ctx.arc(
+                        x + BORDER_RADIUS,
+                        y + h - BORDER_RADIUS,
+                        BORDER_RADIUS,
+                        90 * degrees,
+                        180 * degrees,
+                    )
+                    ctx.arc(
+                        x + BORDER_RADIUS,
+                        y + BORDER_RADIUS,
+                        BORDER_RADIUS,
+                        180 * degrees,
+                        270 * degrees,
+                    )
                     ctx.close_path()
                 else:
                     ctx.rectangle(x, y, w, h)
@@ -458,7 +418,3 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         exit(0)
-else:
-    print(
-        "xborders: This program is not meant to be imported to other Python modules. Please run xborders as a "
-        "standalone script!")
